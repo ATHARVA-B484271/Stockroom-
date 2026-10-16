@@ -7,6 +7,7 @@ const stockMovementSchema = new mongoose.Schema({
   previousStock: { type: Number, required: true, min: 0 },
   newStock: { type: Number, required: true, min: 0 },
   note: { type: String, trim: true, maxlength: 240, default: '' },
+  reference: { type: String, trim: true, maxlength: 120, default: '' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true })
 

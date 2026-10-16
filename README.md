@@ -1,711 +1,601 @@
-# Grocery Wholesale Inventory Management System
+# StockRoom
 
-A web-based inventory workspace for grocery wholesalers supplying products in bulk to retail shops. The system keeps a catalog of products and categories, tracks current quantities and stock changes, highlights products at or below their restock threshold, and provides an overview of inventory value and recent activity.
+**StockRoom** is a web-based inventory management workspace for grocery wholesalers supplying products in bulk to retail shops. It brings product and category records, current stock, low-stock thresholds, and an auditable stock-movement history into one authenticated application.
 
-The application is branded **Stockroom** in its user interface. It consists of a React/Vite frontend and an Express API backed by MongoDB through Mongoose.
+StockRoom is an inventory-control tool, not a point-of-sale or accounting application. Product prices are catalog data; the app does not record retail sales, supplier purchase orders, retailer orders, invoices, or historical stock balances.
 
-## Table of Contents
+## Contents
 
-- [Project Overview](#project-overview)
-- [Application Architecture and Screens](#application-architecture-and-screens)
-- [Key Features](#key-features)
-- [Current Scope and Limitations](#current-scope-and-limitations)
-- [Technology Stack](#technology-stack)
-- [Project Folder Structure](#project-folder-structure)
+- [Overview](#overview)
+- [Features](#features)
+- [Technology stack](#technology-stack)
+- [Project structure](#project-structure)
 - [Prerequisites](#prerequisites)
-- [Installation and Setup](#installation-and-setup)
-- [Environment Variables](#environment-variables)
-- [MongoDB Atlas Configuration](#mongodb-atlas-configuration)
-- [Database Schema](#database-schema)
-- [Database Seeding](#database-seeding)
-- [Running the Application](#running-the-application)
-- [Application Workflow](#application-workflow)
-- [API Documentation](#api-documentation)
+- [Installation and setup](#installation-and-setup)
+- [Environment variables](#environment-variables)
+- [MongoDB Atlas setup](#mongodb-atlas-setup)
+- [Data model](#data-model)
+- [Sample data](#sample-data)
+- [Running StockRoom](#running-stockroom)
+- [Application workflow](#application-workflow)
+- [Roles and permissions](#roles-and-permissions)
+- [API reference](#api-reference)
 - [Screenshots](#screenshots)
-- [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
-- [Security Considerations](#security-considerations)
-- [Future Enhancements](#future-enhancements)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [Planned enhancements](#planned-enhancements)
 - [Contributing](#contributing)
 - [License](#license)
 
-## Project Overview
+## Overview
 
-Wholesale teams often need to keep product details, bulk pack sizes, on-hand quantities, and stock changes consistent while serving multiple retail customers. This application brings those inventory tasks into one authenticated workspace. It stores inventory in MongoDB, records stock movements with before-and-after quantities, and summarizes the active catalog and low-stock items.
+Wholesale inventory changes quickly: products arrive in bulk, quantities are dispatched to retailers, and staff need a reliable way to see what is on hand and what needs replenishing. StockRoom keeps a shared product catalog and records each stock-in, stock-out, or adjustment with its previous and resulting quantity.
 
-> **Data model note:** The application does not have a separate `stock` collection. Current on-hand quantity and low-stock threshold are fields on each product. Stock changes are recorded in the `stockmovements` collection.
+The database stores product quantity directly on each product. **There is no separate `stock` collection**. Historical changes are stored in `stockmovements`; these entries are used for operational reporting, not for reconstructing historical inventory balances.
 
-The system is designed around inventory control, not retail checkout: it has no retailer order, point-of-sale, supplier purchasing, invoice, or sales-report workflow. The `unitPrice` field is catalog pricing information; the application does not use it to record sales.
+### Main workspace pages
 
-## Application Architecture and Screens
-
-```text
-React browser app (Vite, development default :5173)
-        │  JSON over /api; Bearer JWT on protected requests
-        ▼
-Express API (development default :4000)
-        │  Mongoose models and queries
-        ▼
-MongoDB database (stockroom by default)
-```
-
-- **Frontend:** `client/src/App.jsx` contains the single-page workspace, page components, forms, API helper, client-side search/filter behavior, and login/invitation screens. `client/src/main.jsx` mounts the React application. Vite's development server proxies `/api` to the Express server.
-- **API:** `server/server.js` validates required configuration, configures JSON parsing, CORS and error handling, mounts the routes, connects to MongoDB, and starts listening only after the database connection succeeds.
-- **Persistence:** Mongoose models define categories, products, movements, users, and invitations. MongoDB is the source of truth; the application does not have a local sample-data fallback.
-- **Authentication:** after login the browser holds the JWT in `localStorage`; protected API calls send it as a Bearer token. Every API request reloads its inventory data from the API rather than using a separate frontend database.
-
-### Workspace pages
-
-| Page | What it shows or does |
+| Page | Implemented behavior |
 | --- | --- |
-| Overview | Active product count, total on-hand quantity, inventory value at cost, low-stock count, products needing restock, recent activity, and a shortcut to record stock. |
-| Products | Active product catalog with search by name/SKU/category, category or low-stock filtering, add/edit actions, and archive action. |
-| Categories | Category list, number of active products assigned to each category, category creation, and deletion when unused. |
-| Stock entry | Shortcuts for incoming, outgoing, and adjustment movements; a view of today's activity based on the recent movements loaded in the browser. |
-| Movement history | Search and type-filter the movements currently loaded by the client (the latest 50 by default). |
-| Team | Administrator list and invitation form. Invitation delivery requires server SMTP configuration. |
+| Overview | Current active-product, unit, category, inventory-at-cost, low-stock, and daily movement summaries; recent activity and low-stock products. |
+| Products | Search and filter the active product list, sort and paginate it in the browser, create and edit products, and archive products. Quantity changes must use a stock movement. |
+| Categories | Search categories, view active product and unit totals, open a category's paginated product detail, and create or delete unused categories. |
+| Stock entry | Unified stock workspace with Stock entry, Stock in, and Stock out tabs. The entry view provides stock movement shortcuts, recent totals, and adjustment actions for users with permission. |
+| Stock in / Stock out tabs | Within Stock entry; shows active products, current quantities, the latest movement per product, and date-specific transaction totals, and opens a product-prefilled movement form. |
+| Movement history | Server-paginated movement history with movement type, product, category, business-date range, and search filters. |
+| Daily & monthly reports | Timezone-aware movement counts and quantities, per-hour or per-day charts, top moved products, a current inventory snapshot, and CSV export of the report summary. |
+| Team & permissions | Admin-only team management: role and permission assignment, account activation, invitations, resend/revoke, and invitation status history. |
 
-Low-stock status is displayed in the product list, overview and navigation badge. The notification icon is a navigation shortcut to products, not a push-notification or alert-delivery system.
+Low stock means `quantity <= lowStockThreshold`. The threshold is a per-product setting.
 
-Some login-page artwork and workspace-card text (including the displayed workspace name and plan) is static presentation content, not data read from a configurable workspace or subscription model.
+## Features
 
-## Key Features
+- Product catalog with SKU, category, brand, wholesale unit, pack size, pack unit, wholesale price, unit cost, current quantity, and low-stock threshold.
+- Category creation, deletion when unused, category summaries, and category-specific product search, status filtering, sorting, and pagination.
+- Transactional stock-in, stock-out, and physical-count adjustments. A stock-out cannot reduce quantity below zero, and an adjustment requires a reason.
+- Movement notes and optional supplier/dispatch reference, recording creator, timestamp, quantity, and before/after stock.
+- Dashboard low-stock indicators and inventory value calculated from current quantity multiplied by unit cost.
+- Daily and monthly reports grouped using the configured business timezone. Historical movement totals are kept distinct from current inventory snapshots.
+- CSV export of movement-summary and trend data for the selected report period.
+- JWT sign-in, invitation-based account setup, administrator/inventory-manager/staff roles, custom non-admin permissions, and account deactivation.
+- Local-only invitation-link preview when SMTP is not configured and `CLIENT_ORIGIN` points to localhost. Invitation links are not returned in production.
 
-- Administrator sign-in and invitation-based onboarding for additional administrators.
-- Product creation, editing, and archiving, including SKU, category, brand, pack size, cost, price, on-hand quantity, and restock threshold.
-- Category creation and deletion; categories with products cannot be deleted.
-- Stock-in, stock-out, and quantity-adjustment entries, with movement history recording the affected product, before-and-after quantities, note, and administrator.
-- Low-stock identification when a product's quantity is less than or equal to its threshold.
-- Product search by name, SKU, or category name, plus category and low-stock filters in the frontend.
-- Dashboard metrics for active products, total units, inventory value at unit cost, low-stock count, and today's movement count.
-- Recent activity, movement history, and an administrator team list.
+## Technology stack
 
-Search and filtering are performed in the frontend against the products or movements it has loaded; the products API does not implement search or pagination. The history and stock-page views are based on the latest 50 movements loaded by the client. The dashboard's `todayMovementCount`, by contrast, is counted server-side across movements created since local server midnight.
-
-## Current Scope and Limitations
-
-- The application manages a single shared inventory database. It does not implement multiple companies, warehouses, locations, or user-defined workspaces.
-- Every account role is `admin`; there are no staff, read-only, or per-feature permissions.
-- There is no retailer order entry, sales checkout, supplier/purchase-order management, invoicing, or sales analytics.
-- Stock quantity is integer-based at movement entry. The API does not support fractional movement quantities.
-- The product edit endpoint accepts a `quantity` field, but editing quantity there does not create a corresponding movement. Use the stock-entry screen and `POST /movements` when the change should be auditable.
-- A stock movement updates the product document and then creates its history document. These writes are not wrapped in a MongoDB transaction.
-- There is no movement-history pagination. The frontend loads the latest 50 entries, and the API allows a maximum of 200 per request.
-- Product prices/costs are stored as numbers with no currency field. The frontend currently formats displayed prices in INR.
-- There is no automated test script configured in either package.
-
-## Technology Stack
-
-| Area | Technologies |
+| Area | Implementation |
 | --- | --- |
-| Frontend | React 19, JavaScript ES modules, Vite 8 |
+| Frontend | React 19, Vite 8, JavaScript, CSS |
+| Charts | Chart.js |
 | Backend | Node.js, Express 5 |
-| Database / ODM | MongoDB (Atlas-supported), Mongoose 8 |
+| Database and ODM | MongoDB, MongoDB Atlas-compatible deployment, Mongoose 8 |
 | Authentication | JSON Web Tokens (`jsonwebtoken`), `bcryptjs` password hashing |
-| Other backend libraries | `cors`, `dotenv`, `express-rate-limit`, `nodemailer` |
-| Frontend tooling | ESLint, React Hooks and React Refresh ESLint plugins |
+| Invitation email | Nodemailer |
+| API protections | CORS configuration, JSON request-size limit, Express rate limiting for login and invitations |
+| Tests | Node.js built-in test runner (`node --test`) |
 
-The frontend uses native `fetch` for API requests; no frontend component library or client-side router is configured in the package manifest.
-
-## Project Folder Structure
+## Project structure
 
 ```text
 .
 ├── README.md
 ├── client/
 │   ├── index.html
-│   ├── .gitignore
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── vite.config.js
-│   ├── eslint.config.js
-│   ├── public/
-│   │   ├── favicon.svg
-│   │   └── icons.svg
 │   └── src/
-│       ├── App.jsx                 # Screens, forms, API calls, and client-side filtering
-│       ├── App.css                 # Application layout and component styles
-│       ├── index.css               # Global styles
-│       ├── main.jsx                # React entry point
-│       └── assets/                 # Image and starter assets
+│       ├── App.jsx                 # App shell, authentication, navigation, forms
+│       ├── AdvancedPages.jsx       # Category detail, stock flows, reports, history, team
+│       ├── AdvancedPages.css       # Styles for the added workspaces and charts
+│       ├── App.css
+│       ├── redesign.css
+│       ├── index.css
+│       └── main.jsx
 └── server/
-    ├── .env.example                # Safe configuration template
-    ├── .gitignore
-    ├── README.md                   # Existing server-specific setup notes
+    ├── .env.example
     ├── package.json
-    ├── package-lock.json
-    ├── server.js                   # Express setup, middleware, API mounting, DB connection
+    ├── server.js                   # Express startup, MongoDB connection, route setup
     ├── scripts/
-    │   ├── seedAdmin.js            # Create or reset the first administrator
-    │   └── seedGroceryInventory.js # Import sample categories, products, and movements
-    └── src/
-        ├── middleware/
-        │   ├── auth.js             # Bearer-token authentication
-        │   └── rateLimit.js        # Login and invitation rate limits
-        ├── models/
-        │   ├── Category.js
-        │   ├── Invitation.js
-        │   ├── Product.js
-        │   ├── StockMovement.js
-        │   └── User.js
-        ├── routes/
-        │   ├── authRoutes.js
-        │   ├── categoryRoutes.js
-        │   ├── dashboardRoutes.js
-        │   ├── movementRoutes.js
-        │   └── productRoutes.js
-        └── utils/
-            └── asyncHandler.js
+    │   ├── migrateInvitations.js   # One-time, non-destructive invitation-index migration
+    │   ├── seedAdmin.js
+    │   └── seedGroceryInventory.js
+    ├── src/
+    │   ├── middleware/
+    │   │   ├── auth.js             # JWT verification and active-account check
+    │   │   ├── authorization.js    # Roles, permission defaults, access middleware
+    │   │   └── rateLimit.js
+    │   ├── models/
+    │   │   ├── Category.js
+    │   │   ├── Invitation.js
+    │   │   ├── Product.js
+    │   │   ├── StockMovement.js
+    │   │   └── User.js
+    │   ├── routes/
+    │   │   ├── authRoutes.js
+    │   │   ├── categoryRoutes.js
+    │   │   ├── dashboardRoutes.js
+    │   │   ├── movementRoutes.js
+    │   │   └── productRoutes.js
+    │   └── utils/
+    │       ├── asyncHandler.js
+    │       └── businessTime.js
+    └── test/
+        ├── authorization.test.js
+        └── businessTime.test.js
 ```
 
-Each application has its own `package.json` and lockfile. Run npm commands from the project root using `--prefix server` or `--prefix client`, or change into the corresponding directory first.
+The Vite development server proxies `/api` to `http://localhost:4000`. The browser stores its JWT in `localStorage` and sends it as a Bearer token to protected API routes.
 
 ## Prerequisites
 
-- Node.js **20.19 or later in the 20.x line**, **22.13 or later in the 22.x line**, or **24 or later**. This satisfies the current frontend toolchain's Node.js engine requirements.
-- npm, included with Node.js.
-- A MongoDB Atlas cluster, or a compatible MongoDB server reachable from the API.
-- A modern browser.
-- An SMTP provider only if administrator email invitations are needed.
+- Node.js **20.19+** or **22.12+** (required by the Vite 8 toolchain).
+- npm.
+- A MongoDB Atlas database or another MongoDB deployment configured as a replica set. Stock changes and product creation use transactions; standalone MongoDB does not support those transactions.
+- An SMTP service only if invitations should be delivered by email. For local development, the API can return a one-time local invitation URL when SMTP is not configured.
 
-## Installation and Setup
+## Installation and setup
 
-Run the following from the project root:
+1. Clone the repository and open two terminals in its root directory.
+2. Install the backend and frontend dependencies:
 
-1. Create a MongoDB Atlas cluster and database user, and configure network access as described in [MongoDB Atlas Configuration](#mongodb-atlas-configuration).
-2. Copy the existing server environment template:
-
-   ```sh
-   cp server/.env.example server/.env
+   ```bash
+   cd server
+   npm install
    ```
 
-3. Edit `server/.env`. Replace the MongoDB URI placeholders and set a private administrator password and a random JWT secret. See [Environment Variables](#environment-variables) for requirements. Keep this file private.
-4. Install dependencies for both independent npm projects:
+   In the second terminal:
 
-   ```sh
-   npm --prefix server ci
-   npm --prefix client ci
+   ```bash
+   cd client
+   npm install
    ```
 
-5. Create the first administrator account:
+3. Configure the backend environment:
 
-   ```sh
-   npm --prefix server run seed:admin
+   ```bash
+   cd server
+   cp .env.example .env
    ```
 
-6. Optionally import the sample grocery categories and products:
+   Edit `server/.env` with your own MongoDB URI, a random JWT secret of at least 32 characters, and administrator bootstrap values. **Never commit `server/.env` or put real credentials in this README.**
 
-   ```sh
-   npm --prefix server run seed:grocery
+4. Configure the MongoDB Atlas cluster as described in [MongoDB Atlas setup](#mongodb-atlas-setup).
+5. Before running the upgraded application against a database that was used by an earlier StockRoom version, run the invitation migration once:
+
+   ```bash
+   cd server
+   npm run migrate:invitations
    ```
 
-   Run this after creating the administrator because the seed script attributes opening stock movements to that user.
+   The migration retains existing invitation records and upgrades old pending administrator invitations. It removes the former unique-email and TTL-expiration indexes, then creates indexes that support invitation status history and resend/revoke operations. Run this before starting the server with the new invitation schema.
+6. Create the first administrator:
 
-7. Start the frontend and backend as described in [Running the Application](#running-the-application), then sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` configured in `server/.env`.
+   ```bash
+   cd server
+   npm run seed:admin
+   ```
 
-## Environment Variables
+   The script reads `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` from `server/.env`. Passwords must be at least 12 characters. If the account already exists, the command does not change its password. Use `npm run reset:admin` only when an explicit password reset is intended.
+7. Optionally load sample grocery categories and products:
 
-The existing, non-secret template is [`server/.env.example`](server/.env.example). Copy it to `server/.env`; do not put server secrets in a `VITE_` variable, because frontend-prefixed variables are made available to browser code.
+   ```bash
+   cd server
+   npm run seed:grocery
+   ```
 
-| Variable | Required? | Purpose |
+   This script is additive: existing matching categories and product SKUs are left unchanged. See [Sample data](#sample-data) for its behavior.
+
+There is no client `.env` file required for local development. `VITE_API_URL` is optional; it defaults to `/api`.
+
+## Environment variables
+
+`server/.env.example` is a placeholder template. Replace values locally; do not put real secrets into the example file.
+
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `MONGODB_URI` | Yes, for the API and seed scripts | MongoDB connection URI. The supplied template selects the `stockroom` database. |
-| `JWT_SECRET` | Yes, for the API | Secret used to sign and verify tokens; the server requires at least 32 characters. |
+| `MONGODB_URI` | Yes | MongoDB connection string, including the database name. |
+| `JWT_SECRET` | Yes | Signing secret; startup rejects values shorter than 32 characters. |
 | `JWT_EXPIRES_IN` | No | JWT lifetime accepted by `jsonwebtoken`; defaults to `12h`. |
 | `PORT` | No | API port; defaults to `4000`. |
-| `CLIENT_ORIGIN` | No | Comma-separated allowed browser origins for CORS; defaults to `http://localhost:5173`. |
-| `ADMIN_NAME` | Required by `seed:admin` | Name for the initial administrator. |
-| `ADMIN_EMAIL` | Required by `seed:admin` and `seed:grocery` | Email for the initial administrator and the user credited with imported movements. |
-| `ADMIN_PASSWORD` | Required by `seed:admin` | Initial administrator password; must be at least 12 characters. |
-| `SMTP_URL` | Optional; required for invitations | SMTP connection URL used by Nodemailer. |
-| `MAIL_FROM` | Optional; required for invitations | Verified sender address used for invitation email. |
-| `VITE_API_URL` | Optional; frontend only | API base URL, configured in `client/.env.local` if the API is not reachable through Vite's `/api` proxy. Defaults to `/api`. |
+| `CLIENT_ORIGIN` | No | Comma-separated allowed browser origins; defaults to `http://localhost:5173`. |
+| `SMTP_URL` | For email invitations | Nodemailer transport URL. Without it, only local development preview is available. |
+| `MAIL_FROM` | For email invitations | Sender address displayed on invitation emails. |
+| `ADMIN_NAME` | For `seed:admin` | Initial administrator name. |
+| `ADMIN_EMAIL` | For seeding | Initial administrator email; also used by the grocery seed script to find that user. |
+| `ADMIN_PASSWORD` | For `seed:admin` | Initial password; at least 12 characters. |
+| `BUSINESS_TIMEZONE` | No | IANA timezone for dashboard daily counts and date/month reports; defaults to `Asia/Kolkata`. |
+| `INVITATION_LIFETIME_HOURS` | No | Invitation lifetime, 1–720 whole hours; defaults to 24. |
 
-The API requires `MONGODB_URI` and `JWT_SECRET` at startup. The seed scripts require their own variables as noted above. Administrator invitation email is unavailable unless both SMTP settings are configured. Invitation links expire after 24 hours.
+Example placeholders:
 
-For a separately hosted API, set `VITE_API_URL` in `client/.env.local` to the API base URL (for example, `https://api.example.com/api`) and set `CLIENT_ORIGIN` on the server to the frontend's origin. Do not include secrets in `client/.env.local`.
+```dotenv
+MONGODB_URI=mongodb+srv://<db_username>:<db_password>@<cluster-host>/stockroom?retryWrites=true&w=majority
+JWT_SECRET=replace-with-a-random-secret-of-at-least-32-characters
+JWT_EXPIRES_IN=12h
+PORT=4000
+CLIENT_ORIGIN=http://localhost:5173
+SMTP_URL=smtp://username:password@smtp.example.com:587
+MAIL_FROM=StockRoom <no-reply@example.com>
+ADMIN_NAME=Workspace Administrator
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=replace-with-a-private-password-of-at-least-12-characters
+BUSINESS_TIMEZONE=Asia/Kolkata
+INVITATION_LIFETIME_HOURS=24
+```
 
-## MongoDB Atlas Configuration
+## MongoDB Atlas setup
 
-1. Create or select an Atlas project and cluster.
-2. Create a **database user** with access limited to the application's database. Do not use an Atlas account password as the database credential.
-3. Under **Network Access**, allow connections from the machine or hosting environment running the API. Avoid allowing access from all IP addresses except where strictly required for a temporary development setup.
-4. In the cluster's **Connect** dialog, select the Node.js driver and copy its connection URI.
-5. Put the URI in `MONGODB_URI` in `server/.env`. Keep the database path set to `stockroom`, replace the URI placeholders with the database username, password, and cluster host, and URL-encode reserved characters in the password.
-6. Start the API or run a seed script. Mongoose connects using the configured URI. MongoDB creates the collections and indexes as records are written; there is no collection-creation command in this project.
+1. Create an Atlas project and a database cluster.
+2. In **Database Access**, create a database user with a strong password. URL-encode reserved characters in the password before placing it in a MongoDB URI.
+3. In **Network Access**, allow the development machine's IP address. Avoid allowing access from every IP address for a production database unless a reviewed network policy requires it.
+4. Select **Connect → Drivers**, copy the Node.js connection string, and replace the username, password, and database name. Put the completed URI only in `server/.env` as `MONGODB_URI`.
+5. Ensure the target deployment supports replica-set transactions. Atlas clusters support them. For self-managed deployments, configure a replica set.
+6. Run the invitation migration for databases created by an earlier StockRoom version. Mongoose creates model collections and indexes as the application initializes; manual collection creation is not required.
 
-The Mongoose models map to these collection names: `categories`, `products`, `stockmovements`, `users`, and `invitations`. The application does **not** define a separate `stock` collection.
+The model collections are `categories`, `products`, `stockmovements`, `users`, and `invitations`. There is **no `stock` collection**.
 
-## Database Schema
+## Data model
 
-All schemas use Mongoose timestamps (`createdAt` and `updatedAt`). MongoDB document identifiers are ObjectIds. Fields marked as defaulted may be omitted when creating a document.
+All listed models use Mongoose timestamps, so they include `createdAt` and `updatedAt` unless noted. MongoDB also supplies each document's `_id` ObjectId.
 
 ### `categories`
 
-| Field | Type | Rules / default |
+| Field | Type | Behavior |
 | --- | --- | --- |
 | `name` | String | Required, trimmed, maximum 60 characters; unique case-insensitively. |
-| `description` | String | Optional, trimmed, maximum 240 characters; defaults to `""`. |
-| `createdAt`, `updatedAt` | Date | Added by Mongoose timestamps. |
+| `description` | String | Optional, trimmed, maximum 240 characters; defaults to empty text. |
 
 ### `products`
 
-| Field | Type | Rules / default |
+| Field | Type | Behavior |
 | --- | --- | --- |
 | `name` | String | Required, trimmed, maximum 120 characters. |
 | `sku` | String | Required, trimmed, uppercased, maximum 40 characters, unique. |
-| `description` | String | Optional, trimmed, maximum 500 characters; defaults to `""`. |
-| `brand` | String | Optional, trimmed, maximum 80 characters; defaults to `""`. |
-| `unit` | String | Optional, trimmed, maximum 40 characters; defaults to `""`. |
-| `packSize` | Number or null | Non-negative in the schema; defaults to `null`. Product creation/update routes reject a supplied value of zero. |
-| `packUnit` | String | Optional, trimmed, maximum 40 characters; defaults to `""`. |
-| `category` | ObjectId reference to `Category` or null | Optional; defaults to `null`. |
-| `quantity` | Number | Non-negative; defaults to `0`. Product creation requires a whole-number starting quantity. This is the current on-hand stock. |
-| `unitPrice` | Number | Required and non-negative. |
-| `unitCost` | Number | Required and non-negative. |
-| `lowStockThreshold` | Number | Non-negative; defaults to `5`. |
-| `isArchived` | Boolean | Defaults to `false`. |
-| `createdAt`, `updatedAt` | Date | Added by Mongoose timestamps. |
+| `description` | String | Optional, maximum 500 characters; defaults to empty text. |
+| `brand` | String | Optional, maximum 80 characters; defaults to empty text. |
+| `unit` | String | Wholesale stock-count unit (for example bag or carton), maximum 40 characters. |
+| `packSize` | Number or `null` | Optional, non-negative; a provided value must be greater than zero. |
+| `packUnit` | String | Optional pack measurement unit, maximum 40 characters. |
+| `category` | ObjectId reference to `categories` or `null` | Optional. |
+| `quantity` | Number | Current non-negative on-hand quantity; stock movement input requires whole units. |
+| `unitPrice` | Number | Required, non-negative catalog price. |
+| `unitCost` | Number | Required, non-negative unit cost used for inventory-value summaries. |
+| `lowStockThreshold` | Number | Non-negative, defaults to `5`. |
+| `isArchived` | Boolean | Defaults to `false`; archived products are excluded from active inventory. |
 
-The schema defines a text index on product `name` and `sku`; the current API does not expose a database text-search endpoint.
+The model also defines a text index over `name` and `sku`; current UI search is handled by frontend filtering except for category detail search.
 
 ### `stockmovements`
 
-| Field | Type | Rules / default |
+| Field | Type | Behavior |
 | --- | --- | --- |
-| `product` | ObjectId reference to `Product` | Required. |
-| `type` | String | Required; one of `in`, `out`, or `adjustment`. |
-| `quantity` | Number | Required, non-negative. For adjustments the stored value is the absolute difference from the previous quantity. |
-| `previousStock` | Number | Required, non-negative quantity before the movement. |
-| `newStock` | Number | Required, non-negative quantity after the movement. |
-| `note` | String | Optional, trimmed, maximum 240 characters; defaults to `""`. |
-| `createdBy` | ObjectId reference to `User` | Required. |
-| `createdAt`, `updatedAt` | Date | Added by Mongoose timestamps. |
-
-The model has a descending `createdAt` index for recent movement queries.
+| `product` | ObjectId reference to `products` | Required. Historical records remain when a product is archived. |
+| `type` | String | Required enum: `in`, `out`, or `adjustment`. |
+| `quantity` | Number | Non-negative movement quantity. For adjustments this is the absolute difference, not the target count. |
+| `previousStock` | Number | Required non-negative quantity before the change. |
+| `newStock` | Number | Required non-negative quantity after the change. |
+| `note` | String | Optional, maximum 240 characters. Adjustment entries require a reason. |
+| `reference` | String | Optional supplier or dispatch reference, maximum 120 characters. |
+| `createdBy` | ObjectId reference to `users` | Required movement author. |
+| `createdAt` | Date | Movement timestamp; indexed newest-first. |
 
 ### `users`
 
-| Field | Type | Rules / default |
+| Field | Type | Behavior |
 | --- | --- | --- |
 | `name` | String | Required, trimmed, maximum 80 characters. |
-| `email` | String | Required, trimmed, lowercased, unique. |
-| `passwordHash` | String | Required bcrypt hash; excluded from normal query results. |
-| `role` | String | Restricted to `admin`; defaults to `admin`. |
-| `createdAt`, `updatedAt` | Date | Added by Mongoose timestamps. |
+| `email` | String | Required, unique, lowercased, and trimmed. |
+| `passwordHash` | String | Required bcrypt hash; excluded from ordinary query results. |
+| `role` | String | `admin`, `inventory_manager`, or `staff`; new bootstrap users default to `admin`. |
+| `permissions` | Array of strings | Optional explicit non-admin permission grants. When absent, the user's role defaults are used. Admins always receive all permissions. |
+| `isActive` | Boolean | Defaults to `true`; inactive accounts are denied by login and protected API requests. |
+| `invitedBy` | ObjectId reference to `users` or `null` | User who created the invitation. |
+| `lastLoginAt` | Date or `null` | Updated at successful password login. |
 
 ### `invitations`
 
-| Field | Type | Rules / default |
+| Field | Type | Behavior |
 | --- | --- | --- |
-| `name` | String | Required, trimmed, maximum 80 characters. |
-| `email` | String | Required, trimmed, lowercased, unique. |
-| `tokenHash` | String | Required, unique SHA-256 hash of the invitation token. |
-| `expiresAt` | Date | Required; indexed for TTL cleanup. Invitations expire after 24 hours. |
-| `createdBy` | ObjectId reference to `User` | Required. |
-| `createdAt`, `updatedAt` | Date | Added by Mongoose timestamps. |
+| `name`, `email` | String | Invitee identity; email is lowercased and trimmed. |
+| `tokenHash` | String | Unique SHA-256 hash; the raw invitation token is not stored. |
+| `role` | String | Role granted at acceptance: admin, inventory manager, or staff. |
+| `permissions` | Array of strings | Permission grants applied to the new account. |
+| `status` | String | `pending`, `accepted`, `revoked`, or `expired`. |
+| `message` | String | Optional invitation note, maximum 240 characters. |
+| `expiresAt` | Date | Required invitation expiry. Expired invitation records are retained for status history. |
+| `acceptedAt`, `revokedAt` | Date or `null` | Lifecycle timestamps. |
+| `createdBy` | ObjectId reference to `users` | Administrator who invited the user. |
 
-### Relationships and inventory representation
+### Relationships
 
-- A product optionally references one category; the category API prevents deleting categories that are still assigned to products.
-- A stock movement references one product and the administrator who recorded it.
-- An invitation references the administrator who sent it.
-- On-hand stock is `products.quantity`; movement documents preserve the change history. There is no `stocks` or `stock` model.
-- Category names are unique case-insensitively. Product SKUs, user emails, and invitation emails have unique indexes.
-- Product names and SKUs share a MongoDB text index. The current routes do not run text-index queries.
-- Mongoose's default model-to-collection pluralization yields the lowercase collection names documented above.
+- A product optionally references one category; a category can have many products.
+- A stock movement references one product and the user who recorded it.
+- An invitation references the inviter. On acceptance, the new user also stores that inviter in `invitedBy`.
+- Product quantity is the current balance. The application does not maintain a separately queryable historical balance per date.
 
-### Example document shapes
+## Sample data
 
-These examples illustrate the model fields; ObjectIds and timestamps are generated by MongoDB/Mongoose. Passwords and invitation tokens are never stored in these forms.
+The supported grocery seed command is:
 
-```json
-{
-  "_id": "<category-object-id>",
-  "name": "Grains & Flours",
-  "description": "",
-  "createdAt": "<date>",
-  "updatedAt": "<date>"
-}
+```bash
+cd server
+npm run seed:grocery
 ```
 
-```json
-{
-  "_id": "<product-object-id>",
-  "name": "Basmati Rice",
-  "sku": "GRA001",
-  "description": "",
-  "brand": "Generic",
-  "unit": "bag",
-  "packSize": 25,
-  "packUnit": "kg",
-  "category": "<category-object-id>",
-  "quantity": 100,
-  "unitPrice": 1650,
-  "unitCost": 1500,
-  "lowStockThreshold": 10,
-  "isArchived": false,
-  "createdAt": "<date>",
-  "updatedAt": "<date>"
-}
+It requires `MONGODB_URI` and `ADMIN_EMAIL`, and it requires that the administrator already exists. The script adds categories such as **Grains & Flours**, **Pulses & Lentils**, **Edible Oils & Ghee**, **Spices & Masalas**, **Daily Essentials**, and **Snacks & Packaged Food**, plus sample products such as Basmati Rice, Wheat Flour, Toor Dal, Sunflower Oil, Sugar, and Biscuits.
+
+This is an additive seed, not a reset: existing matching category names and SKUs are skipped, and existing product details/quantities are not overwritten. The seed records opening movements for a selected subset of seeded SKUs only when the product quantity still equals the seed quantity; it avoids duplicating a matching opening note. Review the script before using sample data in a production database.
+
+## Running StockRoom
+
+Start the backend in one terminal:
+
+```bash
+cd server
+npm run dev
 ```
 
-```json
-{
-  "_id": "<movement-object-id>",
-  "product": "<product-object-id>",
-  "type": "in",
-  "quantity": 100,
-  "previousStock": 0,
-  "newStock": 100,
-  "note": "Initial inventory",
-  "createdBy": "<user-object-id>",
-  "createdAt": "<date>",
-  "updatedAt": "<date>"
-}
+The API listens at `http://localhost:4000` by default.
+
+Start the frontend in a second terminal:
+
+```bash
+cd client
+npm run dev
 ```
 
-## Database Seeding
+Open the Vite URL printed by the command (normally `http://localhost:5173`) and sign in with the bootstrap administrator credentials. The Vite proxy forwards `/api` requests to port 4000.
 
-The server package provides two scripts:
+Other available commands:
 
-```sh
-npm --prefix server run seed:admin
-npm --prefix server run seed:grocery
-```
+| Directory | Command | Purpose |
+| --- | --- | --- |
+| `server` | `npm start` | Start the API without Node watch mode. |
+| `server` | `npm run seed:admin` | Create the configured bootstrap admin if it does not exist. |
+| `server` | `npm run reset:admin` | Reset the configured admin password. |
+| `server` | `npm run seed:grocery` | Add the sample grocery data described above. |
+| `server` | `npm run migrate:invitations` | Apply the one-time invitation-index and record migration. |
+| `server` | `npm test` | Run backend unit tests with Node's test runner. |
+| `client` | `npm run lint` | Run ESLint. |
+| `client` | `npm run build` | Create the production frontend build in `client/dist`. |
+| `client` | `npm run preview` | Preview the built frontend locally. |
 
-- `seed:admin` reads `MONGODB_URI`, `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` from `server/.env`. It creates the initial administrator and hashes the password with bcrypt. It will not silently change an existing administrator's password.
-- To intentionally change that administrator's password, update `ADMIN_PASSWORD` in `server/.env` and run:
+## Application workflow
 
-  ```sh
-  npm --prefix server run reset:admin
-  ```
+1. **Create categories and products.** A product can be assigned to a category and stores pack, pricing, and low-stock information. Product creation may include an opening quantity; if positive, that quantity and its initial stock-in movement are committed together.
+2. **Record incoming stock.** Choose an active product, enter a positive whole quantity, and optionally add a supplier/delivery reference and note. StockRoom increments the product balance and creates a movement record in the same transaction.
+3. **Record outgoing stock.** Enter a positive whole quantity and optional dispatch reference. The transaction is rejected if it would make the product quantity negative.
+4. **Adjust a stocktake count.** Enter the new on-hand total, not the difference, and provide a reason. StockRoom stores the absolute difference as movement `quantity` and stores the before/after values.
+5. **Review and replenish.** Products at or below their configured threshold appear in low-stock summaries. Movement history can be searched and filtered. Daily/monthly reports summarize movements by business-timezone date; current low-stock and category data are current snapshots, not historical ones.
+6. **Manage access.** Admins invite users with a role and optional individual grants. Invitation tokens expire after the configured lifetime, are hashed in the database, and can be resent or revoked. Deactivation prevents login and is checked again on every protected API request.
 
-- `seed:grocery` reads `MONGODB_URI` and `ADMIN_EMAIL`. It adds the following categories when they do not already exist (name comparison is case-insensitive):
+MongoDB transactions require a replica-set-capable deployment, such as MongoDB Atlas.
 
-  `Grains & Flours`, `Pulses & Lentils`, `Edible Oils & Ghee`, `Spices & Masalas`, `Daily Essentials`, `Snacks & Packaged Food`, `Dairy Products`, and `Household & Personal Care`.
+## Roles and permissions
 
-  It adds the following sample products when their SKUs do not already exist. All are assigned brand `Generic`; amounts are sample currency values because no currency setting is configured in the application.
+All permission checks are enforced by the API; hiding a navigation item is not the security boundary.
 
-  | SKU | Product | Category | Pack | Cost | Price | Opening quantity | Low-stock threshold |
-  | --- | --- | --- | --- | ---: | ---: | ---: | ---: |
-  | `GRA001` | Basmati Rice | Grains & Flours | 25 kg bag | 1500 | 1650 | 100 | 10 |
-  | `GRA002` | Wheat Flour | Grains & Flours | 50 kg bag | 1600 | 1750 | 80 | 10 |
-  | `PUL001` | Toor Dal | Pulses & Lentils | 30 kg bag | 3600 | 3900 | 50 | 5 |
-  | `PUL002` | Moong Dal | Pulses & Lentils | 30 kg bag | 3000 | 3300 | 40 | 5 |
-  | `OIL001` | Sunflower Oil | Edible Oils & Ghee | 15 litre tin | 1950 | 2100 | 40 | 5 |
-  | `SPI001` | Turmeric Powder | Spices & Masalas | 10 kg carton | 1200 | 1400 | 25 | 3 |
-  | `ESS001` | Sugar | Daily Essentials | 50 kg bag | 2100 | 2250 | 70 | 10 |
-  | `ESS002` | Iodized Salt | Daily Essentials | 25 kg bag | 400 | 475 | 60 | 10 |
-  | `SNK001` | Biscuits | Snacks & Packaged Food | 1 carton | 450 | 510 | 100 | 10 |
-  | `HOU001` | Detergent Powder | Household & Personal Care | 1 carton | 900 | 1020 | 45 | 5 |
+| Role | Default access |
+| --- | --- |
+| `admin` | All permissions, including team administration. Admin grants cannot be narrowed by a custom permission list. |
+| `inventory_manager` | Inventory/dashboard viewing, product and category management, movement view/in/out/adjustment, and reports. |
+| `staff` | Inventory/dashboard viewing and movement history. Other capabilities must be granted by an administrator. |
 
-  Existing matching categories and SKUs are left unchanged. Opening movement records are attempted for `GRA001`, `GRA002`, `PUL001`, `OIL001`, and `ESS001` when the product still has the sample quantity; duplicate notes are skipped. Create the administrator first; the script uses that account as `createdBy`. Although the frontend formats prices in INR, the database has no currency field; the sample numeric prices are illustrative.
+The UI permits assigning non-admin grants for inventory/dashboard viewing, product/category management, movement viewing/in/out/adjustment, and reports. A product/category-management grant implies inventory viewing; a stock-write grant implies inventory and movement viewing so the operator can select products and review the result. `team.read` and `team.manage` are deliberately not assignable as custom grants; team administration remains admin-only.
 
-The seed script stores current quantity directly on each sample product. It does not create a `stock` collection or add an unusable sample user.
+## API reference
 
-## Running the Application
-
-Open two terminals at the project root.
-
-**Terminal 1 — API:**
-
-```sh
-npm --prefix server run dev
-```
-
-This runs `node --watch server.js` and serves the API at `http://localhost:4000` by default. For a non-watch start, use `npm --prefix server start`.
-
-**Terminal 2 — frontend:**
-
-```sh
-npm --prefix client run dev
-```
-
-Open the local URL printed by Vite (normally `http://localhost:5173`) and sign in with the configured administrator email and password. During development, Vite forwards `/api` requests to `http://localhost:4000`. The API health check is available at `http://localhost:4000/api/health`.
-
-Frontend build and lint commands are available as:
-
-```sh
-npm --prefix client run build
-npm --prefix client run lint
-```
-
-No server test or lint script is defined in the server package.
-
-## Application Workflow
-
-1. **Create the first administrator.** The seed command hashes the configured password and inserts a user document.
-2. **Sign in.** The frontend sends credentials to the login endpoint. The API checks the bcrypt hash and returns a signed JWT; the frontend stores it in browser local storage and uses it as a Bearer token for protected requests.
-3. **Organize the catalog.** Create categories and products. A product stores its SKU, descriptive details, pack information, category reference, price/cost, quantity, and low-stock threshold. Adding a product with a positive starting quantity also creates an `in` movement with the note `Initial inventory`.
-4. **Record inventory changes.** Stock entry supports `in`, `out`, and `adjustment`. An adjustment's submitted quantity is the new on-hand quantity. Stock-out requests cannot reduce a product below zero. Each successful entry updates the product quantity and stores before/after values, movement type, quantity/delta, note, and administrator.
-5. **Monitor inventory.** The dashboard calculates summary metrics from active products and today's movements. A product is considered low-stock when `quantity <= lowStockThreshold`; low-stock filtering is available on the product page.
-6. **Review activity.** The stock page and movement history show recent saved movements. The API's movement list defaults to the most recent 50 records.
-
-### Movement quantity semantics
-
-| Movement type | Submitted `quantity` means | Resulting on-hand quantity | Stored movement `quantity` |
-| --- | --- | --- | --- |
-| `in` | Number of units received | Previous quantity + submitted quantity | Units received |
-| `out` | Number of units removed | Previous quantity − submitted quantity; the result cannot be negative | Units removed |
-| `adjustment` | New counted on-hand quantity | Submitted quantity | Absolute difference between old and new quantity |
-
-For example, adjusting from 12 units to 9 submits `"quantity": 9`; the movement stores `previousStock: 12`, `newStock: 9`, and `quantity: 3`. This movement is a count correction, not a stock-out.
-
-## API Documentation
-
-The API base URL is `http://localhost:4000/api` by default. Responses are JSON. Except for `GET /health`, `POST /auth/login`, and `POST /auth/invitations/accept`, endpoints require:
+The API is mounted under `/api`. All endpoints except `GET /api/health`, `POST /api/auth/login`, and `POST /api/auth/invitations/accept` require:
 
 ```http
 Authorization: Bearer <JWT>
+Content-Type: application/json
 ```
 
-The authenticated routes are mounted behind the server's `requireAuth` middleware. The invitation creation and administrator-list routes additionally check for the `admin` role.
+Protected endpoints also require the corresponding user permission. JSON errors use `{ "message": "..." }`. Object IDs below are MongoDB ObjectId strings.
 
-### Endpoints
+### Health and authentication
 
-| Method | Endpoint | Authentication | Request / behavior | Success response |
-| --- | --- | --- | --- | --- |
-| `GET` | `/health` | No | Health check. | `{ "status": "ok" }` |
-| `POST` | `/auth/login` | No | JSON body: `email`, `password`. | `{ "token": "...", "user": { "id", "name", "email", "role" } }` |
-| `GET` | `/auth/me` | Yes | Current authenticated account. | `{ "user": { "id", "name", "email", "role" } }` |
-| `GET` | `/auth/admins` | Admin | Lists administrator names, emails, and creation dates. | `{ "admins": [...] }` |
-| `POST` | `/auth/invitations` | Admin | JSON body: `name`, `email`; requires configured SMTP. | `201` and `{ "message": "Administrator invitation sent." }` |
-| `POST` | `/auth/invitations/accept` | No | JSON body: `token`, `password`; password must be at least 12 characters. | `201` and `{ "token": "...", "user": { "id", "name", "email", "role" } }` |
-| `GET` | `/products` | Yes | Lists active products, sorted by update time; populates category name. `?includeArchived=true` lists archived products only. | `{ "products": [...] }` |
-| `POST` | `/products` | Yes | Creates a product; required: `name`, `sku`, `quantity`, `unitPrice`, `unitCost`. Other supported fields are listed below. | `201` and `{ "product": {...} }` |
-| `PATCH` | `/products/:id` | Yes | Updates supplied product fields. | `{ "product": {...} }` |
-| `PATCH` | `/products/:id/archive` | Yes | Archives an active product. | `{ "product": {...} }` |
-| `GET` | `/categories` | Yes | Lists categories sorted by name. | `{ "categories": [...] }` |
-| `POST` | `/categories` | Yes | JSON body: `name` (required), optional `description`. | `201` and `{ "category": {...} }` |
-| `DELETE` | `/categories/:id` | Yes | Deletes a category only if no product references it. | `{ "message": "Category deleted." }` |
-| `GET` | `/movements` | Yes | Lists newest movements first; optional `?limit=N` is clamped to 1–200, default 50. | `{ "movements": [...] }` |
-| `POST` | `/movements` | Yes | Records a stock change; see the request example below. | `201` and `{ "movement": {...} }` |
-| `GET` | `/dashboard` | Yes | Returns active-inventory and today's movement metrics. | `{ "totalProducts", "totalUnits", "inventoryValue", "lowStockCount", "todayMovementCount" }` |
+| Method and path | Access | Purpose |
+| --- | --- | --- |
+| `GET /api/health` | Public | Returns `{ "status": "ok" }`. |
+| `POST /api/auth/login` | Public, rate-limited | Sign in with email and password; returns `{ token, user }`. |
+| `GET /api/auth/me` | Signed-in user | Return the current user and effective permissions. |
+| `GET /api/auth/admins` | `team.manage` | Legacy endpoint; returns all team accounts in an `admins` array. |
+| `GET /api/auth/team` | `team.manage` | Return `{ users, invitations }` with user/invitation lifecycle details. |
+| `POST /api/auth/invitations` | `team.manage`, rate-limited | Create an invitation. Returns invitation metadata; returns `invitationUrl` only for allowed local development preview. |
+| `POST /api/auth/invitations/:id/resend` | `team.manage`, rate-limited | Revoke the previous pending token and create a new invitation record with a fresh token. |
+| `DELETE /api/auth/invitations/:id` | `team.manage` | Revoke a pending invitation. |
+| `PATCH /api/auth/team/:id` | `team.manage` | Update a user's role, permissions, or active status. |
+| `POST /api/auth/invitations/accept` | Public, rate-limited | Accept a valid invitation and set a password of at least 12 characters. |
 
-Product create/update fields follow the `products` schema: `name`, `sku`, `description`, `brand`, `unit`, `packSize`, `packUnit`, `category` (category ObjectId or `null`), `quantity`, `unitPrice`, `unitCost`, and `lowStockThreshold`. Product creation requires a non-negative whole-number `quantity`; price, cost, threshold, and pack size must be non-negative numbers, with a supplied pack size greater than zero.
+Login request:
 
-For stock movement creation, `type` must be `in`, `out`, or `adjustment`; `product` is the product ObjectId; and `quantity` is a positive whole number for `in`/`out`. For `adjustment`, `quantity` is the requested new on-hand quantity and may be zero. `note` is optional and limited to 240 characters.
+```json
+{ "email": "admin@example.com", "password": "a-private-password" }
+```
 
-### Endpoint details
-
-All paths in this section are relative to `http://localhost:4000/api`. Send JSON bodies with `Content-Type: application/json`. Protected endpoints use `Authorization: Bearer <JWT>`.
-
-#### Authentication and team
-
-- `POST /auth/login` accepts `{"email":"admin@example.com","password":"<password>"}`. Email is trimmed and lowercased. A successful response contains a signed token and the public user fields `id`, `name`, `email`, and `role`.
-- `GET /auth/me` returns the authenticated user's public fields under `user`.
-- `GET /auth/admins` returns `{ "admins": [...] }`, sorted by name; each result contains `name`, `email`, `createdAt`, and MongoDB's `_id`.
-- `POST /auth/invitations` accepts `{"name":"New Administrator","email":"person@example.com"}`. It requires an authenticated administrator, a valid email, both SMTP variables, and a recipient email that is not already in use. On success it sends an invitation email and returns `201`.
-- `POST /auth/invitations/accept` accepts `{"token":"<invitation-token>","password":"<new-password>"}`. The token must be valid and unexpired; the password must contain at least 12 characters. A successful acceptance creates the administrator, consumes the invitation, and returns `201` with a token and public user fields.
-
-Login and invitation acceptance are rate-limited to 10 requests per 15 minutes per client IP. Sending invitations is limited to 10 requests per hour per client IP.
-
-#### Products
-
-- `GET /products` returns active products in descending `updatedAt` order, with the category populated as `{ "_id", "name" }` or `null`. `?includeArchived=true` returns archived products instead of active products. There is no API-side search, sort, or pagination.
-- `POST /products` creates a product from the supported product fields. `name`, `sku`, `quantity`, `unitPrice`, and `unitCost` are required by this route. An optional `category` must identify an existing category. The API uppercases the SKU. If initial quantity is positive, it also records an `in` movement attributed to the current user.
-- `PATCH /products/:id` updates the fields included in the request body; omitted fields are left unchanged. It updates only active products. Set `category` to `null` or an empty value to remove the category reference. The route does not create a stock movement when `quantity` is changed directly through this endpoint; use `POST /movements` for auditable stock changes.
-- `PATCH /products/:id/archive` sets `isArchived` to `true`. It does not delete the product or its movement history. Archived products no longer appear in the normal active product list or dashboard metrics.
-
-Example partial edit:
+Invitation request:
 
 ```json
 {
-  "unitPrice": 1725,
-  "lowStockThreshold": 12
+  "name": "Warehouse colleague",
+  "email": "colleague@example.com",
+  "role": "staff",
+  "permissions": ["inventory.read", "dashboard.read", "movements.read"],
+  "message": "Welcome to the inventory team."
 }
 ```
 
-#### Categories
+Allowed invitation roles are `admin`, `inventory_manager`, and `staff`. Omit `permissions` to use that role's defaults. `admin` invitations always receive all administrator permissions.
 
-- `GET /categories` returns `{ "categories": [...] }` sorted by name.
-- `POST /categories` accepts `{"name":"Grains & Flours","description":"Rice, flour, and other grains"}`. Only `name` is required; the model limits it to 60 characters and `description` to 240 characters. Category names are unique without case sensitivity.
-- `DELETE /categories/:id` returns `404` if the category does not exist and `409` if a product still references it. Products must be reassigned before category deletion.
+Invitation acceptance:
 
-#### Stock movements
-
-- `GET /movements?limit=50` returns newest-first `{ "movements": [...] }`, with each movement's `product` populated with its name and SKU. The limit defaults to 50 and is clamped to the inclusive range 1–200. No cursor or page parameter is implemented.
-- `POST /movements` accepts `product` (product ObjectId), `type` (`in`, `out`, or `adjustment`), `quantity`, and optional `note`. The API rejects archived or missing products, invalid whole-number quantities, notes longer than 240 characters, and outgoing quantities greater than available stock. It checks the quantity at update time to prevent overwriting a concurrent quantity change; a conflict returns `409`.
-
-#### Dashboard
-
-- `GET /dashboard` returns `totalProducts`, `totalUnits`, `inventoryValue`, `lowStockCount`, and `todayMovementCount`.
-- Product counts, units, value, and low-stock count include active products only. `inventoryValue` is the sum of `quantity * unitCost`, not retail value. `todayMovementCount` counts movements since midnight according to the API server's local timezone.
-
-### Request examples
-
-**Sign in**
-
-```sh
-curl -X POST http://localhost:4000/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","password":"<your-admin-password>"}'
+```json
+{ "token": "<token-from-invitation-link>", "password": "at-least-12-characters" }
 ```
 
-The response has a `token` and a `user` object. Use the returned token in the `Authorization` header for protected requests.
+Team update example:
 
-Example successful login response:
+```json
+{ "role": "inventory_manager" }
+```
+
+Other accepted fields include `permissions` (an array of assignable permission strings) and `isActive` (boolean). The API prevents an admin from deactivating/demoting their own account or removing the last active administrator.
+
+### Products
+
+| Method and path | Permission | Purpose |
+| --- | --- | --- |
+| `GET /api/products` | `inventory.read` | Return active products, sorted by most recently updated and populated with category name. `?includeArchived=true` returns archived products instead. |
+| `POST /api/products` | `products.manage` | Create a product; positive opening quantity creates an initial stock-in movement in the same transaction. |
+| `PATCH /api/products/:id` | `products.manage` | Update product details. A `quantity` property is rejected; use a movement instead. |
+| `PATCH /api/products/:id/archive` | `products.manage` | Archive an active product without deleting its movement history. |
+
+Create request example:
 
 ```json
 {
-  "token": "<signed-jwt>",
-  "user": {
-    "id": "<user-object-id>",
-    "name": "Workspace Administrator",
-    "email": "admin@example.com",
-    "role": "admin"
-  }
+  "name": "Basmati Rice",
+  "sku": "GRA001",
+  "category": "<category-object-id>",
+  "brand": "Example brand",
+  "unit": "bag",
+  "packSize": 25,
+  "packUnit": "kg",
+  "unitPrice": 1650,
+  "unitCost": 1500,
+  "quantity": 100,
+  "lowStockThreshold": 10,
+  "description": "25 kg wholesale bag"
 }
 ```
 
-**Create a product** (replace the category ID if assigning a category; omit `category` to leave it unassigned):
+Successful create returns `{ "product": { ... } }`; list returns `{ "products": [...] }`.
 
-```sh
-curl -X POST http://localhost:4000/api/products \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <JWT>' \
-  -d '{
-    "name": "Basmati Rice",
-    "sku": "GRA001",
-    "brand": "Generic",
-    "unit": "bag",
-    "packSize": 25,
-    "packUnit": "kg",
-    "quantity": 100,
-    "unitCost": 1500,
-    "unitPrice": 1650,
-    "lowStockThreshold": 10
-  }'
-```
+### Categories
 
-The response is `201` with a `product` object containing the saved document, including its generated `_id`, timestamps, and populated category (or `null`). The server creates an initial stock-in movement when the new product's quantity is greater than zero.
+| Method and path | Permission | Purpose |
+| --- | --- | --- |
+| `GET /api/categories` | `inventory.read` | Return categories with active product/unit/value/low-stock summaries. |
+| `GET /api/categories/:id/products` | `inventory.read` | Category detail with active products, latest movement, summary, and server pagination. |
+| `POST /api/categories` | `categories.manage` | Create a category from `name` and optional `description`. |
+| `DELETE /api/categories/:id` | `categories.manage` | Delete only when no products reference the category. |
 
-**Create a category**
+Category product filters: `page`, `limit` (maximum 100), `search` (name or SKU), `status` (`all`, `low`, `in-stock`, `out-of-stock`), and `sort` (`name-asc`, `name-desc`, `quantity-asc`, `quantity-desc`, `last-movement-desc`). The response contains `{ category, summary, products, pagination }`.
 
-```sh
-curl -X POST http://localhost:4000/api/categories \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <JWT>' \
-  -d '{"name":"Pulses & Lentils","description":"Bulk lentils and pulses"}'
-```
+### Stock movements
 
-The response is `201` with `{ "category": { ... } }`.
+| Method and path | Permission | Purpose |
+| --- | --- | --- |
+| `GET /api/movements` | `movements.read` | Return paginated movement records (default 50 per page; maximum 200), populated with product, category, and creator. |
+| `GET /api/movements/summary` | `movements.read` | Return period/filter-specific transaction and quantity totals plus affected products. |
+| `GET /api/movements/latest-by-product` | `movements.read` | Return the latest historical movement for each active product. |
+| `POST /api/movements` | Type-specific | Create a transactionally applied stock-in, stock-out, or adjustment. |
 
-**Record a stock-out**
+List and summary filters support `type` (`in`, `out`, `adjustment`), `product`, `category`, `from`, and `to`. Dates use `YYYY-MM-DD` in `BUSINESS_TIMEZONE`. List additionally accepts `page`, `limit`, `search`, and `sort=oldest` (newest is the default).
 
-```sh
-curl -X POST http://localhost:4000/api/movements \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <JWT>' \
-  -d '{
-    "product": "<product-object-id>",
-    "type": "out",
-    "quantity": 4,
-    "note": "Wholesale dispatch"
-  }'
-```
-
-The response is `201` with a `movement` object containing the populated product summary (`_id`, `name`, and `sku`), `type`, `quantity`, `previousStock`, `newStock`, `note`, `createdBy`, and timestamps.
-
-**Record an adjustment**
-
-```sh
-curl -X POST http://localhost:4000/api/movements \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <JWT>' \
-  -d '{
-    "product": "<product-object-id>",
-    "type": "adjustment",
-    "quantity": 9,
-    "note": "Physical stock count"
-  }'
-```
-
-Here `quantity` is the new counted on-hand quantity, not the difference to add or remove.
-
-**Read dashboard totals**
-
-```sh
-curl http://localhost:4000/api/dashboard \
-  -H 'Authorization: Bearer <JWT>'
-```
-
-Example response shape:
+Movement request examples:
 
 ```json
 {
-  "totalProducts": 10,
-  "totalUnits": 610,
-  "inventoryValue": 123450,
-  "lowStockCount": 2,
-  "todayMovementCount": 5
+  "type": "in",
+  "product": "<product-object-id>",
+  "quantity": 24,
+  "reference": "SUPPLIER-INV-1042",
+  "note": "Weekly restock"
 }
 ```
 
-The values above are illustrative, not fixed seed output; they depend on the database state.
+```json
+{
+  "type": "adjustment",
+  "product": "<product-object-id>",
+  "quantity": 118,
+  "note": "Physical stock count"
+}
+```
 
-API errors use a JSON body with a `message` property. Common statuses include `400` for invalid input, `401` for missing/expired authentication, `403` for insufficient role, `404` for missing records, `409` for duplicate or conflicting inventory operations, and `500` for unexpected server errors.
+Successful creation returns `{ "movement": { ... } }`. Adjustment input `quantity` means the new total stock; the stored movement's `quantity` is the absolute difference.
 
-Additional statuses include `413` for JSON request bodies exceeding the 20 KB limit, `429` for rate-limited requests, `502` when the invitation email cannot be sent, and `503` when invitation email configuration is missing. Duplicate-key errors return `409`; Mongoose validation and invalid ObjectId cast errors return `400`. Unknown API paths return `404` with `{ "message": "API endpoint not found." }`.
+### Dashboard and reports
+
+| Method and path | Permission | Purpose |
+| --- | --- | --- |
+| `GET /api/dashboard` | `dashboard.read` | Current inventory snapshot, low-stock items, category breakdown, and movement count for today in the business timezone. |
+| `GET /api/dashboard/daily?date=YYYY-MM-DD` | `reports.read` | Daily movement report; defaults to the current business date. Includes hourly activity buckets. |
+| `GET /api/dashboard/monthly?month=1&year=2026` | `reports.read` | Monthly report; defaults to the current business month. Includes daily activity buckets. |
+
+Daily/monthly report responses include `{ period, timeZone, summary, byType, trend, topProducts, inventory, recentMovements, movementCount, note }`. `summary` contains movement transaction count, movement units, and distinct affected products. `inventory` is a **current** snapshot and must not be interpreted as a historical balance. Movement units are not sales units or revenue.
 
 ## Screenshots
 
-Screenshots are not currently included in the project. Add images under `docs/screenshots/` and replace each placeholder when they are available.
+Screenshots are not currently checked into the repository. Capture and add images here when available:
 
 | Screen | Screenshot |
 | --- | --- |
-| Dashboard | _Screenshot pending — `docs/screenshots/dashboard.png`_ |
-| Product management | _Screenshot pending — `docs/screenshots/products.png`_ |
-| Category management | _Screenshot pending — `docs/screenshots/categories.png`_ |
-| Stock management | _Screenshot pending — `docs/screenshots/stock.png`_ |
+| Dashboard | `![StockRoom dashboard](docs/screenshots/dashboard.png)` |
+| Product management | `![StockRoom product management](docs/screenshots/products.png)` |
+| Category management | `![StockRoom category management](docs/screenshots/categories.png)` |
+| Stock management | `![StockRoom stock management](docs/screenshots/stock-management.png)` |
 
-## Error Handling and Troubleshooting
+Until those files are added, the Markdown image references above are placeholders and will not render an image on GitHub.
 
-| Problem | Checks / resolution |
+## Troubleshooting
+
+| Symptom | Resolution |
 | --- | --- |
-| API exits with missing environment variables | Confirm `server/.env` exists and contains `MONGODB_URI` and `JWT_SECRET`. The JWT secret must be at least 32 characters. |
-| MongoDB connection fails or times out | Verify the URI, database username/password, cluster hostname, and Atlas Network Access allow-list. URL-encode reserved characters in the database password. Confirm the cluster is running and reachable from the API host. |
-| `Authentication failed` from MongoDB | Use the Atlas **database user** credentials in `MONGODB_URI`, not the credentials used to sign in to the Atlas website. |
-| Login is rejected | Run `npm --prefix server run seed:admin` after configuring `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`. Use the matching email and password. If the admin already exists, update the password explicitly with `npm --prefix server run reset:admin`. |
-| Browser cannot reach `/api` | Ensure the server is running on port 4000 and the frontend is using Vite's development server. For a separate API origin, set `VITE_API_URL` in `client/.env.local` and allow the frontend origin with `CLIENT_ORIGIN`. |
-| CORS error from another frontend origin | Add that exact origin to `CLIENT_ORIGIN`; multiple allowed origins may be comma-separated. Restart the API after changing its environment. |
-| Invitation endpoint returns service unavailable or email fails | Set both `SMTP_URL` and `MAIL_FROM` using valid provider settings. Check the server log for the SMTP delivery error. |
-| `npm ci` fails | Confirm Node.js meets the version requirement, use a supported npm version bundled with Node.js, and run the command from the project root as shown. Client and server dependencies are installed separately. |
-| Port is already in use | Set `PORT` to an available API port. The Vite proxy currently targets `http://localhost:4000`; if changing the API port for frontend development, update the proxy in `client/vite.config.js` to match. |
-| A category cannot be deleted | Reassign or remove it from its products first; the API intentionally rejects deletion while referenced. |
+| API exits with missing `MONGODB_URI` or `JWT_SECRET` | Copy `server/.env.example` to `server/.env` and fill in the local values. Ensure the JWT secret has at least 32 characters. |
+| `Could not connect to MongoDB` / server selection timeout | Check the URI, database-user credentials, URL-encoding of reserved password characters, Atlas IP allowlist, DNS/network access, and cluster status. |
+| Transaction or replica-set error while adding stock | The deployment does not support transactions. Use Atlas or configure MongoDB as a replica set. |
+| Invitation migration index conflict | Stop the API, confirm the configured URI points to the intended database, run `npm run migrate:invitations`, then start the upgraded server. The script only changes invitation indexes and fills lifecycle fields; it does not delete invitation documents. |
+| Invitations cannot be emailed | Configure a valid `SMTP_URL` and `MAIL_FROM`. Local preview requires non-production mode and a localhost `CLIENT_ORIGIN`; production deliberately never returns a raw invitation token in the API response. |
+| Browser reports CORS or failed `/api` requests | Run the client at the configured `CLIENT_ORIGIN`, check `CLIENT_ORIGIN` on the server, and ensure the API is listening on port 4000. If using a different API host, set the client `VITE_API_URL`. |
+| `npm install` or Vite reports an unsupported Node version | Use Node.js 20.19+ or 22.12+ and reinstall the package dependencies. |
+| Login succeeds but a protected request returns 403 | The signed-in account may be inactive or lack the required permission. Ask an active administrator to check the role and grants. |
+| Duplicate SKU, email, or category name | Each product SKU and user email must be unique; category names are unique without regard to letter case. |
+| Low-stock count seems higher than expected | A product is low when its quantity is less than **or equal to** its configured threshold. |
+| Client lint/build fails after dependency changes | From `client`, run `npm install`, then `npm run lint` and `npm run build`; use the first reported file/line to diagnose. |
 
-## Security Considerations
+## Security
 
-- Keep `server/.env` and all deployed environment values private. Never commit MongoDB credentials, administrator passwords, SMTP credentials, or the JWT secret. Use the safe `server/.env.example` as a template.
-- Set a unique, random `JWT_SECRET` of at least 32 characters and use a strong administrator password of at least 12 characters.
-- Passwords are stored as bcrypt hashes, not plaintext. Password hashes are excluded from normal user queries and are not included in API user responses.
-- Protected routes require a signed Bearer JWT. The frontend currently stores this token in browser `localStorage`; deployments should account for the XSS exposure associated with browser-accessible token storage and serve the application over HTTPS.
-- Login attempts and invitation sends are rate-limited. Submitted data is checked by route-level validation and Mongoose schema constraints; Express also limits JSON request bodies to 20 KB.
-- Configure Atlas Network Access narrowly and use a database account with only the access required by this application's database.
-- Configure `CLIENT_ORIGIN` for the actual frontend origin when deploying. Do not use wildcard CORS access for a public deployment.
-- All supported user roles are currently `admin`; the current implementation does not provide differentiated staff permissions.
+- Keep `server/.env` private and excluded from version control. Use distinct, strong MongoDB credentials and a random JWT secret; rotate credentials if they are exposed.
+- Passwords are bcrypt-hashed with a cost factor of 12. Invitation acceptance requires a password of at least 12 characters. There is no password-reset flow currently.
+- Invitation tokens are generated with cryptographic randomness, stored only as SHA-256 hashes, expire, and can be revoked. A raw invitation URL is returned only for non-production localhost development when SMTP is not configured.
+- JWTs are verified on every protected API request. The API reloads the user on each request and blocks inactive accounts, so role changes and deactivation apply without waiting for a new token.
+- The browser stores the JWT in `localStorage`; protect the frontend against cross-site scripting and consider an `HttpOnly`, `Secure`, `SameSite` cookie-based session design before deploying to a sensitive production environment.
+- API route handlers validate IDs, numeric quantities, date formats, role assignments, permission grants, and text lengths. Access is checked on the server, not just hidden in the UI.
+- Login and invitation endpoints are rate-limited. Requests are limited to 20 KB JSON. CORS origins are configured with `CLIENT_ORIGIN`.
+- Restrict Atlas network access, use TLS in deployed environments, and serve the frontend/API over HTTPS. Production deployment should set `NODE_ENV=production`, configure SMTP, and keep logs free of credentials and invitation tokens.
+- The application has no separate audit log for team permission changes; movement records are retained for normal stock operations.
 
-## Future Enhancements
+## Planned enhancements
 
-The following are **not implemented in the current application** and are possible future additions:
+The following are **not implemented** and are possible future work:
 
-- Barcode scanning for product lookup and stock entry.
-- Expiry-date and batch/lot tracking for perishable goods.
-- Supplier records and purchase-order workflows.
-- Retailer accounts, order management, and fulfillment tracking.
-- Invoice generation and printable/exportable documents.
-- Sales reports, historical trends, and downloadable analytics.
+- Barcode scanning and barcode-based product lookup.
+- Expiry-date and batch/lot tracking.
+- Supplier records, purchase orders, and receiving workflows.
+- Retailer records and retailer orders.
+- Invoice generation and export.
+- Sales, revenue, margin, and accounting reports.
+- Multi-warehouse support and stock transfers.
+- Password reset and stronger optional MFA.
 
 ## Contributing
 
 1. Fork the repository and create a focused feature branch.
-2. Keep changes scoped to the intended feature or fix and avoid committing `.env` files or generated dependencies.
-3. Install dependencies in both packages using `npm --prefix server ci` and `npm --prefix client ci`.
-4. For frontend changes, run `npm --prefix client run lint` and `npm --prefix client run build`.
-5. Describe the change, setup requirements, and any manual verification performed in your pull request.
+2. Keep changes scoped to the requested feature and preserve the existing React/Express/MongoDB architecture.
+3. Do not include real credentials or production data.
+4. Run checks from the affected package:
 
-There is no automated server test script currently defined in `server/package.json`.
+   ```bash
+   cd server && npm test
+   cd ../client && npm run lint && npm run build
+   ```
+
+5. Include a clear description of the behavior change and any database migration or configuration requirement in your pull request.
 
 ## License
 
-No license file or license declaration is present in the project. The project license has **not yet been specified**.
+No license file or license declaration is currently present in the repository. The project license is **not yet specified**.

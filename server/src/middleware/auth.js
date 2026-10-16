@@ -13,8 +13,9 @@ export const requireAuth = asyncHandler(async (request, response, next) => {
   } catch {
     return response.status(401).json({ message: 'Your session has expired. Please sign in again.' })
   }
-  const user = await User.findById(claims.sub).select('name email role')
+  const user = await User.findById(claims.sub).select('name email role permissions isActive lastLoginAt createdAt')
   if (!user) return response.status(401).json({ message: 'Your account is no longer available.' })
+  if (!user.isActive) return response.status(403).json({ message: 'Your account has been deactivated. Contact an administrator.' })
   request.user = user
   next()
 })

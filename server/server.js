@@ -19,6 +19,17 @@ if (process.env.JWT_SECRET.length < 32) {
   console.error('JWT_SECRET must be at least 32 characters long.')
   process.exit(1)
 }
+const invitationLifetimeHours = Number(process.env.INVITATION_LIFETIME_HOURS || 24)
+if (!Number.isInteger(invitationLifetimeHours) || invitationLifetimeHours < 1 || invitationLifetimeHours > 720) {
+  console.error('INVITATION_LIFETIME_HOURS must be a whole number between 1 and 720.')
+  process.exit(1)
+}
+try {
+  new Intl.DateTimeFormat('en-US', { timeZone: process.env.BUSINESS_TIMEZONE || 'Asia/Kolkata' }).format(new Date())
+} catch {
+  console.error('BUSINESS_TIMEZONE must be a valid IANA timezone, such as Asia/Kolkata.')
+  process.exit(1)
+}
 
 const app = express()
 const port = Number(process.env.PORT) || 4000
@@ -39,6 +50,10 @@ app.use((error, _request, response, _next) => {
   if (error.code === 11000) return response.status(409).json({ message: 'A record with that name, SKU, or email already exists.' })
   if (error.name === 'ValidationError' || error.name === 'CastError') {
     return response.status(400).json({ message: error.message })
+  }
+  if (error instanceof RangeError) return response.status(400).json({ message: error.message })
+  if (Number.isInteger(error.status) && error.status >= 400 && error.status <= 599) {
+    return response.status(error.status).json({ message: error.message })
   }
   console.error(error)
   response.status(500).json({ message: 'An unexpected server error occurred.' })
